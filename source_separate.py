@@ -3,7 +3,6 @@ import sys
 import librosa
 from spleeter.audio.adapter import AudioAdapter
 from spleeter.separator import Separator
-from PySynth.pysynth_c import make_wav
 
 # Function to use Spleeter's command line program.
 # Not used in current build
@@ -46,7 +45,7 @@ def audio2midi(wav_stem, audio2midi_path, file_name, stem_name):
 def main(audio_file="audio_example.mp3", num_of_stem=5):
     input_song_path = os.path.join("input_songs", audio_file)
     input_song_name = audio_file[:-4]
-    bpm = librosa.beat.tempo(input_song_path)
+    bpm = librosa.beat.tempo(librosa.load(input_song_path)[0])
 
     # Separate song in to stems
     stem_separate(input_song_path, num_stems=num_of_stem)
@@ -62,8 +61,10 @@ def main(audio_file="audio_example.mp3", num_of_stem=5):
 
     # Convert midi files to chiptune
     midi_path = os.path.join('midi', input_song_name)
+    pysynth_path = 'PySynth/readmidi.py'
+    os.makedirs(os.path.join('chiptune_stems', input_song_name), exist_ok=True)
     for midi_file in os.listdir(midi_path):
-        make_wav(song=os.path.join(midi_path, midi_file), bpm=bpm, fn=midi_file[:-4]+'.wav')
+        os.system("python " + pysynth_path + " {} {} {}".format(os.path.join(midi_path,midi_file), 1, os.path.join('chiptune_stems', input_song_name, midi_file[:-4]+'.wav')))
 
 
 
