@@ -1,7 +1,5 @@
 import os
 import sys
-import librosa
-from spleeter.separator import Separator
 import IPython.display as ipd
 import numpy as np
 import soundfile as sf
@@ -9,6 +7,12 @@ import shutil
 import pyrubberband as pyrb
 import crepe
 from scipy.interpolate import interp1d
+import warnings
+
+with warnings.catch_warnings():
+    warnings.simplefilter("ignore",category=DeprecationWarning)
+    import librosa
+    from spleeter.separator import Separator
 
 
 BASS_SCALE = 3*12 # octaves
@@ -34,36 +38,36 @@ def stem_separate(song_path, num_stems=5):
 # Function to remove excess sound from stem. Gets fundamental frequency
 # Input: stem path
 # Return: None (original stems replaced)
-def stem_process(song_name):
+def stem_process(song_name, bpm, sr):
     hop_size = 1024
 
     stem_directory = os.path.join('temp_data', 'spleeter_output', song_name)  # path to .wav stem files
 
     for wav_stem in os.listdir(stem_directory):
-        if wav_stem == 'drums.wav': continue  #dont sonify drums
         stem_path = os.path.join(stem_directory,wav_stem)
         # load stem
         stem_audio, sr = librosa.load(stem_path)
 
-        # shift the bass up by BASS_SHIFT
-        if wav_stem == 'bass.wav':
-            stem_audio = pyrb.pitch_shift(stem_audio, sr, BASS_SCALE)
+        if wav_stem == 'drums.wav':
+            processed_stem = drum_scrub(stem_audio, bpm, sr, amp=0.5)
 
-        # predict frequency
-        # time, stem_frequency, confidence, activation = crepe.predict(stem, sr, viterbi=True)
-        stem_frequency = np.nan_to_num(librosa.pyin(stem_audio, fmin=20, fmax=3000, sr=sr)[0])
+        else:
+            # shift the bass up by BASS_SHIFT
+            if wav_stem == 'bass.wav':
+                stem_audio = pyrb.pitch_shift(stem_audio, sr, BASS_SCALE)
 
-        # sonify into audio
-        sonified_stem = sonify(stem_frequency, sr, hop_size)
+            # predict frequency
+            # time, stem_frequency, confidence, activation = crepe.predict(stem, sr, viterbi=True)
+            stem_frequency = np.nan_to_num(librosa.pyin(stem_audio, fmin=20, fmax=3000, sr=sr)[0])
 
-        # covert to original speed
-        sonified_stem = librosa.effects.time_stretch(sonified_stem, 2)
+            # sonify into audio
+            processed_stem = sonify(stem_frequency, sr, hop_size)
 
-        # output for testing
-        # sf.write('sonified_'+wav_stem[:-4]+'.wav', sonified_stem, samplerate=sr)
+            # convert to original speed
+            processed_stem = librosa.effects.time_stretch(processed_stem, 2)
 
         # overwrite original stem
-        sf.write(stem_path, sonified_stem, samplerate=sr)
+        sf.write(stem_path, processed_stem, samplerate=sr)
 
     return
 
@@ -136,7 +140,7 @@ def mixer(tracks):
         if 'bass' in track:
             stem = pyrb.pitch_shift(stem, sr, -BASS_SCALE)  # 3 octaves
 
-        if 'other' in track or 'drums' in track: continue
+        if 'other' in track : continue
 
         # pad if mixed track and curr stem not equal in length
         if len(mixed_track) > len(stem):
@@ -181,6 +185,21 @@ def sonify(pitch_track, srate, hop_size):
 
     return audio
 
+# Function to remove all but kick and snare sounds from drum track
+def drum_scrub(drum_audio, sr, bpm, amp=0.6):
+
+    drum_scrubbed = np.zeros(len(drum_audio))
+    max_note = round((bpm/60/2/2/2/2)*sr)  # 64th note
+
+    j=0
+    while j<len(drum_audio):
+        if np.abs(drum_audio[j]) > float(amp):
+            drum_scrubbed[j:j+max_note] = drum_audio[j:j+max_note]
+            j += max_note
+        else: j+=1
+
+    return drum_scrubbed
+
 
 def main(audio_file="pop.00000.wav", num_of_stem=4):
     #set up paths and variables needed
@@ -192,14 +211,14 @@ def main(audio_file="pop.00000.wav", num_of_stem=4):
 
     # load source song
     song_audio, sr = librosa.load(input_song_path)
-    bpm = librosa.beat.tempo(song_audio)
+    bpm = librosa.beat.beat_track(song_audio)[0]
 
     # BEGIN-----------------------------------------------------
     # PHASE 1: Separate song in to stems
     stem_separate(song_path=input_song_path, num_stems=num_of_stem)
 
     # Process stems
-    stem_process(song_name=input_song_name)
+    stem_process(song_name=input_song_name,  bpm=bpm, sr=sr)
 
     # PHASE 2: Convert stem wav files to midi files
     audio2midi(song_name=input_song_name)
